@@ -42,7 +42,7 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Frontend URL'den gelen isteklere veya origin olmayan isteklere (yani, aynı kaynaktan) izin ver
     // Development ortamında köken kontrolünü devre dışı bırakabilirsiniz, ama production'da dikkat!
-    const allowedOrigins = [config.frontendURL, 'http://localhost:3000'];
+    const allowedOrigins = [config.frontendURL, 'http://localhost:3000', 'http://localhost:3001'];
     const originIsAllowed = !origin || allowedOrigins.includes(origin);
     
     if (originIsAllowed) {
