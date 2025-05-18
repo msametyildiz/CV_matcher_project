@@ -1,89 +1,34 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const cors = require('cors');
-const connectDB = require('./config/database');
-const config = require('./config/config');
-const fs = require('fs');
 const path = require('path');
-const errorHandler = require('./middlewares/error.middleware');
+require('dotenv').config();
 
-// Upload klasörlerini oluştur
-const uploadsDir = path.join(__dirname, '../uploads');
-const cvsDir = path.join(uploadsDir, 'cvs');
-
-// Dizinlerin var olup olmadığını kontrol et, yoksa oluştur
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-  console.log('Uploads directory created');
-}
-
-if (!fs.existsSync(cvsDir)) {
-  fs.mkdirSync(cvsDir);
-  console.log('CVs directory created');
-}
-
-// Routes importları
-const authRoutes = require('./routes/auth.routes');
-const cvRoutes = require('./routes/cv.routes');
-const jobRoutes = require('./routes/job.routes');
-const matchingRoutes = require('./routes/matching.routes');
-
-// Express app
 const app = express();
 
-// Database bağlantısı
-connectDB();
-
 // Middleware
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// CORS yapılandırması
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Frontend URL'den gelen isteklere veya origin olmayan isteklere (yani, aynı kaynaktan) izin ver
-    // Development ortamında köken kontrolünü devre dışı bırakabilirsiniz, ama production'da dikkat!
-    const allowedOrigins = [config.frontendURL, 'http://localhost:3000', 'http://localhost:3001'];
-    const originIsAllowed = !origin || allowedOrigins.includes(origin);
-    
-    if (originIsAllowed) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS policy violation: Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+// MongoDB Bağlantısı
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('✅ MongoDB Atlas bağlantısı başarılı'))
+  .catch(err => console.error('❌ MongoDB Atlas bağlantı hatası:', err));
 
-app.use(cors(corsOptions));
+// API Rotaları
+app.use('/api/auth', require('./routes/auth.routes'));
+app.use('/api/job', require('./routes/job.routes'));
+app.use('/api/cv', require('./routes/cv.routes'));
+app.use('/api/matching', require('./routes/matching.routes'));
 
-// Upload klasörüne erişim için statik dosyalar
+// Uploads klasörü için statik dosya sunumu
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/cv', cvRoutes);
-app.use('/api/jobs', jobRoutes);
-app.use('/api/matching', matchingRoutes);
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.send('CV-MatchGPT API çalışıyor');
+// Hata yönetimi
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send({ message: 'Sunucu hatası!' });
 });
 
-// Error handling middleware
-app.use(errorHandler);
-
-// Server başlatma
-const PORT = config.port;
-app.listen(PORT, () => {
-  console.log(`Server ${PORT} numaralı portta çalışıyor`);
-});
-
-// Beklenmeyen hata yakalama
-process.on('unhandledRejection', (err) => {
-  console.log('UNHANDLED REJECTION! Shutting down...');
-  console.log(err.name, err.message);
-  process.exit(1);
-}); 
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server ${PORT} portunda çalışıyor`));

@@ -2,6 +2,7 @@ const CV = require('../models/CV');
 const Job = require('../models/Job');
 const Matching = require('../models/Matching');
 const openaiService = require('./openai.service');
+const Application = require('../models/Application');
 
 /**
  * CV'yi tek bir iş ilanıyla eşleştirme
@@ -266,11 +267,87 @@ async function getTopMatchingCVsForJob(jobId, limit = 20) {
   }
 }
 
+/**
+ * İş ilanına yapılan tüm başvuruları analiz et
+ * @param {string} jobId - İş ilanı ID'si
+ * @returns {Promise<Array>} - Analiz sonuçları
+ */
+const analyzeAllApplicationsForJob = async (jobId) => {
+  try {
+    // İş ilanını getir
+    const job = await Job.findById(jobId);
+    if (!job) {
+      throw new Error('İş ilanı bulunamadı');
+    }
+    
+    // Bu iş ilanına yapılan tüm başvuruları getir
+    const applications = await Application.find({ job: jobId })
+      .populate('cv')
+      .populate('candidate', 'name email');
+      
+    if (!applications || applications.length === 0) {
+      return [];
+    }
+    
+    const analyzeResults = [];
+    
+    // Her başvuru için CV'yi analiz et
+    for (const application of applications) {
+      try {
+        // CV içeriğini analiz için hazırla
+        const cv = application.cv;
+        if (!cv || !cv.content) {
+          console.warn(`CV içeriği eksik, başvuru ID: ${application._id}`);
+          continue;
+        }
+        
+        // OpenAI API ile CV ve iş ilanı eşleştirmesi yap
+        const analysisResult = await openaiService.matchCVWithJob(cv.content, job);
+        
+        // Analiz sonucunu kaydet
+        await Application.findByIdAndUpdate(application._id, {
+          analysis: analysisResult,
+          matchScore: analysisResult.final_score || 0,
+          isAnalyzed: true,
+          analyzedAt: new Date()
+        });
+        
+        // Sonuçları döndürülecek listeye ekle
+        analyzeResults.push({
+          applicationId: application._id,
+          candidateId: application.candidate?._id,
+          candidateName: application.candidate?.name || 'İsim yok',
+          cvTitle: cv.title || 'CV Başlığı yok',
+          matchScore: analysisResult.final_score || 0,
+          technicalScore: analysisResult.final_technical_score || 0,
+          hrScore: analysisResult.final_hr_score || 0,
+          skills: analysisResult.skills || [],
+          strengths: analysisResult.strengths || [],
+          weaknesses: analysisResult.weaknesses || [],
+          recommendation: analysisResult.general_recommendation || '',
+          evaluation: analysisResult.ai_commentary || '',
+        });
+      } catch (error) {
+        console.error(`Başvuru analizi hatası, ID: ${application._id}`, error);
+        // Hatayı yakalayıp diğer başvurularla devam etmek için
+      }
+    }
+    
+    // Sonuçları eşleşme puanına göre sırala
+    return analyzeResults.sort((a, b) => b.matchScore - a.matchScore);
+    
+  } catch (error) {
+    console.error('Batch CV analizi hatası:', error);
+    throw new Error(`Toplu CV analizi sırasında bir hata oluştu: ${error.message}`);
+  }
+};
+
 module.exports = {
   matchCVWithJob,
   matchCVWithAllJobs,
   matchJobWithAllCVs,
   getTopMatchingJobsForUser,
   getTopMatchingCVsForJob,
-  getRecommendedJobsForUser
+  getRecommendedJobsForUser,
+  analyzeAllApplicationsForJob
 }; 

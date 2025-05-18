@@ -20,6 +20,14 @@ router.get(
   matchingController.getMatchingResultsByJobId
 );
 
+// Yeni eklenen endpoint: Bir iş ilanına yapılan tüm başvuruların CV'lerini analiz etme
+router.post(
+  '/analyze-job-applications/:jobId',
+  protect,
+  authorize('employer', 'admin'),
+  matchingController.analyzeJobApplications
+);
+
 // Bir CV için en iyi eşleşen iş ilanlarını getirme (aday)
 router.get(
   '/cv/:cvId',

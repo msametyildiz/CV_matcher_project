@@ -1,6 +1,7 @@
 const matchingService = require('../services/matching.service');
 const CV = require('../models/CV');
 const Job = require('../models/Job');
+const openaiService = require('../services/openai.service');
 
 /**
  * CV'yi bir iş ilanıyla eşleştirme
@@ -231,10 +232,54 @@ const getDetailedMatchingResult = async (req, res) => {
   }
 };
 
+/**
+ * Bir iş ilanına yapılan tüm başvuruları analiz etme
+ * @route POST /api/matching/analyze-job-applications/:jobId
+ * @access Private (employer)
+ */
+const analyzeJobApplications = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    
+    // İş ilanının varlığını kontrol et
+    const job = await Job.findById(jobId);
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: 'İş ilanı bulunamadı'
+      });
+    }
+    
+    // İşveren sadece kendi ilanlarını analiz edebilir
+    if (req.user.role === 'employer' && job.employer.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Bu iş ilanı üzerinde işlem yapma yetkiniz yok'
+      });
+    }
+    
+    // İş ilanına yapılan tüm başvuruları analiz et
+    const results = await matchingService.analyzeAllApplicationsForJob(jobId);
+    
+    res.json({
+      success: true,
+      count: results.length,
+      data: results
+    });
+  } catch (error) {
+    console.error('Başvuru analizi hatası:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Başvuru analizi sırasında bir hata oluştu'
+    });
+  }
+};
+
 module.exports = {
   matchCVWithJob,
   getMatchingResultsByJobId,
   getMatchingResultsByCvId,
   getRecommendedJobs,
-  getDetailedMatchingResult
+  getDetailedMatchingResult,
+  analyzeJobApplications
 }; 
