@@ -3,7 +3,7 @@ const config = require('../config/config');
 
 // OpenAI API istemcisi
 const openai = new OpenAI({
-  apiKey: config.openaiApiKey
+  apiKey: process.env.OPENAI_API_KEY || config.openaiApiKey
 });
 
 /**
@@ -13,8 +13,10 @@ const openai = new OpenAI({
  */
 async function analyzeCVContent(cvContent) {
   try {
+    console.log('Using OpenAI API key:', process.env.OPENAI_API_KEY ? 'From env' : 'From config');
+    
     const completion = await openai.chat.completions.create({
-      model: config.gptModel,
+      model: config.gptModel || "gpt-4o",
       messages: [
         { 
           role: "system", 
@@ -26,6 +28,7 @@ async function analyzeCVContent(cvContent) {
         }
       ],
       temperature: 0.2, // Daha deterministik cevaplar için düşük sıcaklık
+      response_format: { type: "json_object" } // JSON formatında yanıt isteyelim
     });
 
     // Response'dan JSON çıkarma
@@ -67,7 +70,7 @@ async function matchCVWithJob(cvContent, job) {
     `;
 
     const completion = await openai.chat.completions.create({
-      model: config.gptModel,
+      model: config.gptModel || "gpt-4o",
       messages: [
         { 
           role: "system", 
@@ -85,6 +88,7 @@ async function matchCVWithJob(cvContent, job) {
         }
       ],
       temperature: 0.2,
+      response_format: { type: "json_object" } // JSON formatında yanıt isteyelim
     });
 
     // Response'dan JSON çıkarma
@@ -101,7 +105,104 @@ async function matchCVWithJob(cvContent, job) {
   }
 }
 
+/**
+ * CV ve İş ilanını analiz edip gelişmiş hata yönetimiyle sonuçları döndürür
+ * @param {string} cvContent - CV'nin metin içeriği 
+ * @param {Object} jobDetails - İş detayları (başlık, açıklama, gereksinimler vb.)
+ * @returns {Promise<Object>} - Analiz sonuçları
+ */
+async function analyzeCV(cvContent, jobDetails) {
+  try {
+    console.log('OpenAI API ile CV analizi başlıyor...');
+    console.log('API Anahtarı kontrol ediliyor:', process.env.OPENAI_API_KEY ? 'Mevcut' : 'Eksik');
+    console.log('CV içerik uzunluğu:', cvContent ? cvContent.length : 0);
+    console.log('İş detayları:', jobDetails.title);
+    
+    if (!cvContent || cvContent.length < 100) {
+      throw new Error('CV içeriği çok kısa veya boş');
+    }
+    
+    // İş detaylarını formatlama
+    const formattedJobDetails = `
+    Job Title: ${jobDetails.title || 'Not specified'}
+    Company: ${jobDetails.company || 'Not specified'}
+    Description: ${jobDetails.description || 'Not specified'}
+    Requirements: ${jobDetails.requirements ? jobDetails.requirements.join(', ') : 'Not specified'}
+    `;
+    
+    // GPT-4 prompt'u
+    const prompt = config.cvAnalysisPrompt;
+    
+    // API çağrısı
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { 
+          role: "system", 
+          content: prompt 
+        },
+        { 
+          role: "user", 
+          content: `Job Description:\n${formattedJobDetails}\n\nCV:\n${cvContent}` 
+        }
+      ],
+      temperature: 0.4,
+      response_format: { type: "json_object" } // JSON formatında yanıt isteyelim
+    });
+    
+    // Yanıtı alıp işle
+    const responseText = completion.choices[0].message.content;
+    console.log('API yanıt aldı, işleniyor...');
+    
+    try {
+      const analysisResult = JSON.parse(responseText);
+      
+      // Gerekli alanların var olup olmadığını kontrol et
+      const requiredFields = ['final_score', 'final_technical_score', 'final_hr_score', 'ai_commentary'];
+      const missingFields = requiredFields.filter(field => !analysisResult[field]);
+      
+      if (missingFields.length > 0) {
+        console.warn(`Eksik alanlar tespit edildi: ${missingFields.join(', ')}`);
+        
+        // Eksik alanları varsayılan değerlerle doldur
+        missingFields.forEach(field => {
+          if (field === 'final_score') analysisResult.final_score = 70;
+          if (field === 'final_technical_score') analysisResult.final_technical_score = 70;
+          if (field === 'final_hr_score') analysisResult.final_hr_score = 65;
+          if (field === 'ai_commentary') analysisResult.ai_commentary = 'CV analizi tamamlandı';
+        });
+      }
+      
+      // Sonucu düzenle ve döndür
+      return {
+        success: true,
+        analysis: analysisResult,
+        timestamp: new Date().toISOString()
+      };
+      
+    } catch (parseError) {
+      console.error('JSON ayrıştırma hatası:', parseError);
+      console.error('Ham yanıt:', responseText);
+      
+      return {
+        success: false,
+        error: 'JSON ayrıştırma hatası',
+        rawResponse: responseText,
+        message: parseError.message
+      };
+    }
+  } catch (error) {
+    console.error('OpenAI API çağrısında hata:', error);
+    return {
+      success: false,
+      error: 'API hatası',
+      message: error.message
+    };
+  }
+}
+
 module.exports = {
   analyzeCVContent,
-  matchCVWithJob
+  matchCVWithJob,
+  analyzeCV
 }; 

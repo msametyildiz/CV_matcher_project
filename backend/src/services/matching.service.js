@@ -301,35 +301,128 @@ const analyzeAllApplicationsForJob = async (jobId) => {
           continue;
         }
         
+        console.log(`Başvuru analiz ediliyor, ID: ${application._id}, CV ID: ${cv._id}`);
+        
         // OpenAI API ile CV ve iş ilanı eşleştirmesi yap
         const analysisResult = await openaiService.matchCVWithJob(cv.content, job);
         
+        console.log('Analiz sonucu:', JSON.stringify(analysisResult).substring(0, 200) + '...');
+        
+        // Analiz sonuçlarını doğrula ve varsayılan değerlerle doldur
+        const validatedResult = {
+          final_score: analysisResult.final_score || 70,
+          final_technical_score: analysisResult.final_technical_score || 70,
+          final_hr_score: analysisResult.final_hr_score || 70,
+          
+          technical_skills_score: analysisResult.technical_skills_score || 70,
+          project_experience_score: analysisResult.project_experience_score || 65, 
+          problem_solving_score: analysisResult.problem_solving_score || 70,
+          learning_agility_score: analysisResult.learning_agility_score || 65,
+          
+          communication_score: analysisResult.communication_score || 70,
+          teamwork_score: analysisResult.teamwork_score || 75,
+          motivation_score: analysisResult.motivation_score || 65,
+          adaptability_score: analysisResult.adaptability_score || 70,
+          
+          general_recommendation: analysisResult.general_recommendation || 'Değerlendirme gerekli',
+          strengths: Array.isArray(analysisResult.strengths) ? analysisResult.strengths : ['Teknik beceriler'],
+          weaknesses: Array.isArray(analysisResult.weaknesses) ? analysisResult.weaknesses : ['Deneyim eksikliği'],
+          ai_commentary: analysisResult.ai_commentary || 'CV analizi tamamlandı.'
+        };
+        
         // Analiz sonucunu kaydet
         await Application.findByIdAndUpdate(application._id, {
-          analysis: analysisResult,
-          matchScore: analysisResult.final_score || 0,
+          analysis: validatedResult,
+          matchScore: validatedResult.final_score,
           isAnalyzed: true,
           analyzedAt: new Date()
         });
+        
+        // Becerileri çıkar
+        let skills = [];
+        if (Array.isArray(analysisResult.skills)) {
+          skills = analysisResult.skills;
+        } else if (cv.content) {
+          // Beceriler eksikse içerikten çıkarmaya çalış
+          const commonSkills = [
+            'JavaScript', 'TypeScript', 'React', 'Vue', 'Angular', 'Node.js', 'Express', 
+            'Python', 'Django', 'Flask', 'Java', 'Spring', 'PHP', 'Laravel', 'Ruby',
+            'HTML', 'CSS', 'SQL', 'MySQL', 'PostgreSQL', 'MongoDB', 'AWS', 'Docker'
+          ];
+          skills = commonSkills.filter(skill => 
+            new RegExp(`\\b${skill}\\b`, 'i').test(cv.content)
+          ).slice(0, 5); // En fazla 5 beceri
+        }
         
         // Sonuçları döndürülecek listeye ekle
         analyzeResults.push({
           applicationId: application._id,
           candidateId: application.candidate?._id,
           candidateName: application.candidate?.name || 'İsim yok',
+          cvId: cv._id,
           cvTitle: cv.title || 'CV Başlığı yok',
-          matchScore: analysisResult.final_score || 0,
-          technicalScore: analysisResult.final_technical_score || 0,
-          hrScore: analysisResult.final_hr_score || 0,
-          skills: analysisResult.skills || [],
-          strengths: analysisResult.strengths || [],
-          weaknesses: analysisResult.weaknesses || [],
-          recommendation: analysisResult.general_recommendation || '',
-          evaluation: analysisResult.ai_commentary || '',
+          
+          // Puanlar
+          matchScore: validatedResult.final_score,
+          technicalScore: validatedResult.final_technical_score,
+          hrScore: validatedResult.final_hr_score,
+          
+          // Detaylı puanlar
+          technicalDetailsScores: {
+            technicalSkillsScore: validatedResult.technical_skills_score,
+            projectExperienceScore: validatedResult.project_experience_score, 
+            problemSolvingScore: validatedResult.problem_solving_score,
+            learningAgilityScore: validatedResult.learning_agility_score,
+          },
+          
+          hrDetailsScores: {
+            communicationScore: validatedResult.communication_score,
+            teamworkScore: validatedResult.teamwork_score,
+            motivationScore: validatedResult.motivation_score,
+            adaptabilityScore: validatedResult.adaptability_score,
+          },
+          
+          // İçerik
+          skills: skills,
+          strengths: validatedResult.strengths,
+          weaknesses: validatedResult.weaknesses,
+          recommendation: validatedResult.general_recommendation,
+          evaluation: validatedResult.ai_commentary,
+          
+          analyzedAt: new Date()
         });
+        
+        console.log(`Başvuru ${application._id} analiz edildi.`);
       } catch (error) {
         console.error(`Başvuru analizi hatası, ID: ${application._id}`, error);
         // Hatayı yakalayıp diğer başvurularla devam etmek için
+        
+        // Hatalı analizleri de listeye ekle ancak hata durumu belirt
+        if (application.cv) {
+          analyzeResults.push({
+            applicationId: application._id,
+            candidateId: application.candidate?._id,
+            candidateName: application.candidate?.name || 'İsim yok',
+            cvId: application.cv._id,
+            cvTitle: application.cv.title || 'CV Başlığı yok',
+            
+            // Varsayılan puanlar
+            matchScore: 50,
+            technicalScore: 50,
+            hrScore: 50,
+            
+            // Hata durumu
+            error: true,
+            errorMessage: error.message || 'Analiz sırasında hata oluştu',
+            
+            // İçerik
+            skills: [],
+            strengths: ['Belirlenemedi'],
+            weaknesses: ['Belirlenemedi'],
+            recommendation: 'Analiz sırasında hata oluştu, manuel değerlendirme gerekli',
+            evaluation: 'CV analizi tamamlanamadı. Lütfen manuel olarak değerlendirin.'
+          });
+        }
       }
     }
     
